@@ -1,6 +1,6 @@
 import json
 
-
+# Method to fill default values in the configuration if not present
 def fill_default(config):
     set_missing(config, "random_seed", 0)
     set_missing(config, "agent_type", "NNAgent")
@@ -8,12 +8,12 @@ def fill_default(config):
     fill_input_default(config["input"])
     fill_train_config(config["training"])
 
-
+# Method to fill default values in the training configuration
 def fill_train_config(train_config):
     set_missing(train_config, "fast_train", True)
     set_missing(train_config, "decay_rate", 1.0)
 
-
+# Method to fill default values in the input configuration
 def fill_input_default(input_config):
     set_missing(input_config, "save_memory_mode", False)
     set_missing(input_config, "portion_reversed", False)
@@ -21,7 +21,7 @@ def fill_input_default(input_config):
     set_missing(input_config, "norm_method", "absolute")
     set_missing(input_config, "fake_ratio", 1)
 
-
+# Method to fill default values in the layers configuration
 def fill_layers_default(layers):
     for layer in layers:
         if layer["type"] == "ConvLayer":
@@ -47,12 +47,12 @@ def fill_layers_default(layers):
             raise ValueError("layer name {} not supported"
                              .format(layer["type"]))
 
-
+# Method to set a default value in the configuration if the key is not present
 def set_missing(config, name, value):
     if name not in config:
         config[name] = value
 
-
+# Method to load configuration from a JSON file
 def load_config(path):
     print(path)
     with open(path) as file:
@@ -60,7 +60,7 @@ def load_config(path):
     fill_default(config)
     return config
 
-
+# Method to save configuration to a JSON file
 def save_config(config, path):
     with open(path, "w") as file:
         json.dump(config, file, sort_keys=True, indent=4)

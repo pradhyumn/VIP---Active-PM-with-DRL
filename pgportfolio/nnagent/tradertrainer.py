@@ -1,3 +1,4 @@
+# Import necessary libraries
 import logging
 import numpy as np
 import torch as t
@@ -17,11 +18,11 @@ class TraderTrainer(pl.LightningModule):
         """
         super(TraderTrainer, self).__init__()
 
-        # seed
+        # Set random seed for numpy and torch
         np.random.seed(config["random_seed"])
         t.random.manual_seed(config["random_seed"])
 
-        # config shortcuts
+        # Store config and sub-configs for later use
         self._config = config
         self._train_config = config["training"]
         self._input_config = config["input"]
@@ -29,7 +30,7 @@ class TraderTrainer(pl.LightningModule):
         # major components
         logging.info("Setting up buffer.")
 
-        # Note: self.device is "cpu" in init
+        # Initialize buffer and network
         self._cdm, self._buffer = buffer_init_helper(
             config, self.device, online=online, db_directory=db_directory
         )
@@ -41,6 +42,7 @@ class TraderTrainer(pl.LightningModule):
 
         logging.info("Setting up data.")
 
+        # Register training and testing datasets
         self._register_set(self._buffer.get_test_set(), "test")
         if not self._train_config["fast_train"]:
             self._register_set(self._buffer.get_train_set(), "train")
@@ -51,6 +53,7 @@ class TraderTrainer(pl.LightningModule):
                 t.prod(t.max(self._test_set_y[:, 0, :], dim=1)[0])
             ))
 
+    # Properties used by backtest
     @property
     def test_set(self):
         # Used by backtest
@@ -73,13 +76,16 @@ class TraderTrainer(pl.LightningModule):
                              t.tensor(last_w_with_cash[1:], dtype=t.float32)
                              .unsqueeze(0)).squeeze(0).numpy()
 
+    # Forward pass of the network
     def forward(self, x, last_w):
         return self._net(x, last_w)
 
+    # Define DataLoader for training data
     def train_dataloader(self):
         return DataLoader(dataset=self._buffer.get_train_dataset(),
                           collate_fn=lambda x: x)
-
+    
+    # Define a single training step
     def training_step(self, batch, _batch_idx):
         batch = batch[0]
         new_w = self._net(batch["X"], batch["last_w"])
@@ -96,8 +102,8 @@ class TraderTrainer(pl.LightningModule):
         return self._init_metrics()\
             .eval(batch["y"], batch["last_w"], new_w).loss
 
+    # Manually test the model after each training step
     def training_step_end(self, training_output):
-        # Manually test after each training step.
         # Note: _test_set_X, _test_set_y, etc. are registered buffers.
         fast_train = self._train_config["fast_train"]
 
@@ -131,11 +137,13 @@ class TraderTrainer(pl.LightningModule):
         self._net.train()
         return training_output
 
+    # Configure optimizer for training
     def configure_optimizers(self):
         learning_rate = self._config["training"]["learning_rate"]
         decay_rate = self._config["training"]["decay_rate"]
         training_method = self._config["training"]["training_method"]
 
+        # Select the optimizer based on the training_method in config
         if training_method == "GradientDescent":
             optim_method = t.optim.SGD
         elif training_method == "Adam":
@@ -145,7 +153,8 @@ class TraderTrainer(pl.LightningModule):
         else:
             raise ValueError("Unknown training_method(optimizer): {}"
                              .format(training_method))
-
+        
+        # Initialize the optimizer with layer parameters and learning rate
         optim = optim_method([
             {"params": layer.parameters(),
              "weight_decay": layer_config.get("weight_decay") or 0}
@@ -153,9 +162,11 @@ class TraderTrainer(pl.LightningModule):
             zip(self._net.layers, self._config["layers"])
         ], lr=learning_rate)
 
+        # Define learning rate scheduler
         lr_sch = t.optim.lr_scheduler.ExponentialLR(optim, gamma=decay_rate)
         return {"optimizer": optim, "lr_scheduler": lr_sch}
 
+    # Helper function to register a dataset
     def _register_set(self, set, name):
         for k, v in set.items():
             key = "_{}_set_{}".format(name, k)
@@ -164,6 +175,7 @@ class TraderTrainer(pl.LightningModule):
             else:
                 setattr(self, key, v)
 
+    # Helper function to initialize metrics for evaluation
     def _init_metrics(self):
         return Metrics(self._config["trading"]["trading_consumption"],
                        self._train_config["loss_function"])

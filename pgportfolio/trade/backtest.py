@@ -37,27 +37,38 @@ class BackTest:
             agent_algorithm: "nn" for nnagent, or anything in tdagent,
             or "not_used" for pure data extraction with no agent.
         """
+
+        # Cache for traditional data
         global traditional_data_cache
+        # Initialize some class variables
         self._steps = 0
         self._agent_alg = agent_algorithm
         self._verbose = verbose
+        # Log the agent algorithm being used
         logging.info("Creating test agent {}".format(agent_algorithm))
-
+        # If the agent algorithm is neural network (nn)
         if agent_algorithm == "nn":
+            # Find the latest checkpoint in the model directory
             ckpt = self._find_latest_checkpoint(model_directory)
+            # Log the checkpoint being loaded
             logging.info("Loading checkpoint {} for nn agent".format(ckpt))
+            # Load the model from the checkpoint
             self._rolling_trainer = RollingTrainer.load_from_checkpoint(
                 model_directory + "/" + ckpt, map_location="cpu",
                 config=config,
                 online=online,
                 db_directory=db_directory
             )
+            # Get the list of coins and the agent
             self._coin_name_list = self._rolling_trainer.coins
             self._agent = self._rolling_trainer
+            # Get the test set
             test_set = self._rolling_trainer.test_set
+        # If the agent algorithm is one of the traditional methods or not used
         elif agent_algorithm in ALGOS or agent_algorithm == "not_used":
             config = config.copy()
             config["input"]["feature_number"] = 1
+            # If the traditional data cache is empty, initialize it
             if traditional_data_cache is None:
                 cdm, buffer = buffer_init_helper(
                     config, "cpu", online=online, db_directory=db_directory
@@ -67,17 +78,22 @@ class BackTest:
                                           "coin_name_list": cdm.coins}
                 self._coin_name_list = cdm.coins
             else:
+                # If the cache is not empty, use the cached data
                 test_set = traditional_data_cache["test_set"]
                 self._coin_name_list = traditional_data_cache["coin_name_list"]
+            # If the agent algorithm is not "not_used", initialize the agent
             if agent_algorithm != "not_used":
                 self._agent = ALGOS[agent_algorithm]()
         else:
+            # If the agent algorithm is not supported, raise an error
             raise ValueError('The algorithm name "{}" is not supported. '
                              'Supported algorithms are {}'
                              .format(agent_algorithm, str(list(ALGOS.keys()))))
 
+        # Convert the test set to numpy arrays
         self._test_set_X = test_set["X"].cpu().numpy()
         self._test_set_y = test_set["y"].cpu().numpy()
+        # Initialize other variables for the backtest
         self._test_set_length = self._test_set_X.shape[0]
         self._test_pv = 1.0
         self._test_pc_vector = []
@@ -92,30 +108,34 @@ class BackTest:
 
     @property
     def agent(self):
+        # Getter for the agent attribute
         return self._agent
 
     @property
     def agent_algorithm(self):
+        # Getter for the agent algorithm attribute
         return self._agent_alg
 
     @property
     def test_pv(self):
-        # dot product of all values in the portfolio value vector.
+        # Getter for the portfolio value attribute
         return self._test_pv
 
     @property
     def test_data(self):
-        # portfolio relative value vector used in experiments.
+        # Getter for the test data attribute, which generates the test data
         return self._generate_test_data()
 
     @property
     def test_pc_vector(self):
-        # portfolio change vector
+        # Getter for the portfolio change vector
         return np.array(self._test_pc_vector, dtype=np.float32)
 
     def trade(self):
         """
-        Trading simulation.
+        This method simulates trading. It loops through each time step in the test set,
+        makes a decision based on the current history and last weights, performs a trade based on the decided weights,
+        and then logs the results of the trade.
         """
         logging.info("Running algorithm: {}".format(self._agent_alg))
         while self._steps < self._test_set_length:
@@ -150,6 +170,10 @@ class BackTest:
         self._test_pv = self._total_capital
 
     def _generate_history(self):
+        """
+        This method generates the history of inputs for the current time step.
+        It gets the current inputs from the test set and normalizes them if the agent isn't a neural network.
+        """
         inputs = self._test_set_X[self._steps]
         if self._agent_alg != "nn":
             # normalize portfolio features with features from the last period.
@@ -159,12 +183,21 @@ class BackTest:
         return inputs
 
     def _generate_test_data(self):
+        """
+        This method generates the test data for the current time step.
+        It gets the price relative vectors from the test set and adds a row of ones at the top for BTC.
+        """
         test_set = self._test_set_y[:, 0, :].T
         test_set = np.concatenate((np.ones((1, test_set.shape[1])), test_set),
                                   axis=0)
         return test_set
 
     def _trade_by_strategy(self, weight):
+        """
+        This method performs a simulated trade based on the provided weight vector. 
+        It calculates the portfolio value after commission, the change in the portfolio, the total capital, 
+        and the last weight vector after the trade.
+        """
         future_price = np.concatenate([np.ones(1),
                                        self._test_set_y[self._steps, 0, :]])
         pv_after_commission = self._calculate_pv_after_commission(
@@ -183,6 +216,8 @@ class BackTest:
     @staticmethod
     def _calculate_pv_after_commission(w1, w0, commission_rate):
         """
+        This static method calculates the portfolio value after accounting for commission. 
+        It uses an iterative process to account for the transaction costs when rebalancing the portfolio.
         Args:
             w1: target portfolio vector, first element is btc.
             w0: rebalanced last period portfolio vector, first element is btc.
@@ -201,6 +236,10 @@ class BackTest:
 
     @staticmethod
     def _find_latest_checkpoint(model_dir):
+        """
+        This static method finds the latest checkpoint in the model directory. 
+        It raises an error if the directory doesn't exist or there's no checkpoint in it.
+        """
         if not os.path.exists(model_dir) or not os.path.isdir(model_dir):
             raise RuntimeError("Model directory doesn't exist!")
         models = os.listdir(model_dir)
